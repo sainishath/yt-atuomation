@@ -97,7 +97,7 @@ BASE_SYSTEM_INSTRUCTION = (
     "1. Output ONLY strict raw JSON containing exactly: 'title', 'hook_0_5s', 'problem_5_20s', 'twist_20_35s', 'cta_35_45s'. No markdown fences. No extra text.\n"
     "2. TARGET LENGTH: The total script must be between 90 and 110 words to ensure a solid 35-45 second video run. Expand on the mechanisms, stakes, and biological realities. Each section MUST have the exact target word count range (hook: 12-15 words, problem: 35-40 words, twist: 35-40 words, cta: 15-20 words). Write detailed, descriptive sentences to hit this target length.\n"
     "3. PACING: Every sentence must be sharp, punchy, and under 10 words. Use hard periods (.) or exclamation marks (!) frequently. Do not use commas to chain long ideas together.\n"
-    "4. GRAMMAR & EMOJIS: Never output broken English placeholders like 'drop a brain' or 'drop a eye'. Instead, specify exact popular social media elements (e.g., 'Drop a 🧠 emoji', 'Leave a 👁️ comment').\n"
+    "4. NO EMOJIS: Strictly do not include emojis, unicode symbols, or visual graphics anywhere in the output. Keep the script completely in clean, raw text format.\n"
     "5. LOGICAL ALIGNMENT CONSTRAINT: The hook must logically match the scientific or factual payload of the body. If the body explains a beneficial biological mechanism (e.g., yawning cools the brain, boosts focus), the hook MUST attack the viewer's behavior or misconception (e.g., 'You are destroying your morning focus by fighting your yawns.') rather than claiming the mechanism itself is bad (e.g., NEVER claim yawning is bad or toxic).\n"
 )
 
@@ -162,7 +162,7 @@ def generate_script(topic, category):
             "title": "The Brain Cooling Reset",
             "hook": "You are destroying your morning focus by fighting your yawns.",
             "body": "Yawns are not a sign of laziness. They are a literal power-up for your brain. Waking up causes a massive spike in brain temperature. Yawning acts as a natural cooling exhaust system. It floods your skull with cool air and increases blood flow. This instantly sharpens alertness and slashes morning fatigue.",
-            "cta": "Stop fighting the reset. Drop a 👁️ emoji in the comments if you just yawned.",
+            "cta": "Stop fighting the reset. Let me know in the comments if you just yawned.",
             "success": True
         }
 
@@ -289,18 +289,23 @@ def generate_script(topic, category):
 
 
 def sanitize_script(text):
-    """Clean script text by stripping unicode emojis and trailing literal words."""
+    """Clean script text by stripping unicode emojis and converting emoji prompts to text."""
     import re
+    # Convert verbal emoji prompts to clean comments/engagement text
+    clean_text = re.sub(r'\b(drop|leave)\s+a\s+\w+\s+emoji\b', 'comment below', text, flags=re.IGNORECASE)
+    clean_text = re.sub(r'\b(drop|leave)\s+an\s+\w+\s+emoji\b', 'comment below', clean_text, flags=re.IGNORECASE)
+    clean_text = re.sub(r'\b(drop|leave)\s+a\s+\w+\s+icon\b', 'comment below', clean_text, flags=re.IGNORECASE)
+    
     # Removes standard emoji unicode ranges and structural brackets
     emoji_pattern = re.compile(
         r'[\u2600-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|'
         r'[\u2011-\u26FF]|\uD83E[\uDD00-\uDFFF]', 
         flags=re.UNICODE
     )
-    clean_text = emoji_pattern.sub(r'', text)
+    clean_text = emoji_pattern.sub(r'', clean_text)
     
     # Also clean up any literal emoji words if the LLM generated them at the end
-    clean_text = re.sub(r'\b(books|laptop|computer|thumbs up|thumbs-up|eyes emoji|brain emoji)\b\.?$', '', clean_text, flags=re.IGNORECASE)
+    clean_text = re.sub(r'\b(books|laptop|computer|thumbs up|thumbs-up|eyes emoji|brain emoji|emoji)\b\.?$', '', clean_text, flags=re.IGNORECASE)
     
     return clean_text.strip()
 
