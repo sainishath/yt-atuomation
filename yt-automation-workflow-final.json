@@ -1,12 +1,18 @@
 {
+  "id": "yt-shorts-automation-pipeline",
   "name": "YT Automation Pipeline - FIXED",
   "nodes": [
     {
-      "parameters": {},
-      "id": "trigger-manual",
-      "name": "Manual Trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trigger-yt-shorts",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "trigger-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
       "position": [
         0,
         300
@@ -18,13 +24,21 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 9 * * *"
+              "expression": "30 3 * * 2,3,4"
+            },
+            {
+              "field": "cronExpression",
+              "expression": "30 8 * * 2,3,4"
+            },
+            {
+              "field": "cronExpression",
+              "expression": "30 12 * * 6"
             }
           ]
         }
       },
-      "id": "trigger-9am",
-      "name": "Every Day @ 9AM",
+      "id": "trigger-schedule",
+      "name": "Scheduled Posts",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
       "position": [
@@ -33,44 +47,43 @@
       ]
     },
     {
+      "parameters": {},
+      "id": "trigger-manual",
+      "name": "Manual Run",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        700
+      ]
+    },
+    {
       "parameters": {
-        "operation": "list",
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "INSERT_SHEET_ID_HERE"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "YT Automation Content"
-        },
-        "filters": {
-          "conditions": [
-            {
-              "column": "Status",
-              "operator": "isEmpty"
-            }
-          ]
-        },
-        "options": {
-          "limit": 1
-        }
+        "method": "GET",
+        "url": "http://host.docker.internal:5001/get-next-topic",
+        "options": {}
       },
       "id": "read-sheets",
       "name": "Read Next Content Idea",
-      "type": "n8n-nodes-base.googleSheets",
+      "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         260,
         400
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "INSERT_CREDENTIAL_ID_HERE",
-          "name": "Google Sheets account"
-        }
-      }
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst nextRow = items.find(item => {\n  const status = item.json.Status || item.json['Video Status'] || '';\n  return !status || status.trim() === '';\n});\nif (!nextRow) {\n  throw new Error('No pending topics found in the spreadsheet!');\n}\nreturn [nextRow];"
+      },
+      "id": "filter-next-row",
+      "name": "Filter Next Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        400
+      ]
     },
     {
       "parameters": {
@@ -78,7 +91,7 @@
         "url": "http://host.docker.internal:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"llama3\",\n  \"stream\": false,\n  \"system\": \"You are a professional YouTube Shorts script writer. Always respond with raw JSON only.\",\n  \"prompt\": \"Create a high-energy 50-second YouTube Shorts script for topic: {{ $json.Topic }}. Hook Idea: {{ $json['Hook Idea'] }}. Output JSON with keys: 'title' (YT title), 'script' (the spoken text), 'description' (include #shorts), and 'on_screen_title' (2-3 words MAX in ALL CAPS for video overlays).\"\n}",
+        "jsonBody": "={\n  \"model\": \"llama3.2\",\n  \"stream\": false,\n  \"system\": \"You are a professional YouTube Shorts script writer. Always respond with raw JSON only.\",\n  \"prompt\": \"Create a high-energy 50-second YouTube Shorts script for topic: {{ $json.Topic }}. Hook Idea: {{ $json['Hook Idea'] }}. Output JSON with keys: 'title' (YT title), 'script' (the spoken text), 'description' (include #shorts), and 'on_screen_title' (2-3 words MAX in ALL CAPS for video overlays).\"\n}",
         "options": {
           "timeout": 300000
         }
@@ -94,7 +107,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nif (items.length === 0 || !items[0].json || !items[0].json.response) {\n  return [{ json: { error: \"No response from AI\" } }];\n}\n\nconst raw = items[0].json.response;\n\nfunction extract(key, text) {\n  const regex = new RegExp(`\"${key}\"\\\\s*:\\\\s*\"([\\\\s\\\\S]*?)(?=\"\\\\s*[,}])`, 'g');\n  const match = regex.exec(text);\n  if (match && match[1]) {\n    return match[1]\n      .replace(/\\\\n/g, '\\n')\n      .replace(/\\\\\"/g, '\"')\n      .trim();\n  }\n  return '';\n}\n\nreturn [{\n  json: {\n    script: extract('script', raw) || 'Script failed',\n    title: extract('title', raw) || 'New Video',\n    description: extract('description', raw) || '#shorts',\n    on_screen_title: (extract('on_screen_title', raw) || 'TOP REVEAL').toUpperCase(),\n    row_number: $('Read Next Content Idea').item.json.row_number\n  }\n}];"
+        "jsCode": "const items = $input.all();\nif (items.length === 0 || !items[0].json || !items[0].json.response) {\n  return [{ json: { error: 'No response from AI' } }];\n}\n\n// Strip markdown code fences (```json ... ``` or ``` ... ```)\nlet raw = items[0].json.response.trim();\nraw = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\n\nlet parsed = {};\ntry {\n  parsed = JSON.parse(raw);\n} catch(e) {\n  // Fallback: regex extract individual fields\n  function extract(key, text) {\n    const m = text.match(new RegExp('\"' + key + '\"\\\\s*:\\\\s*\"([\\\\s\\\\S]*?)(?=\"\\\\s*[,}])', ''));\n    return m ? m[1].replace(/\\\\n/g, '\\n').replace(/\\\\\"/g, '\"').trim() : '';\n  }\n  parsed = {\n    script: extract('script', raw),\n    title: extract('title', raw),\n    description: extract('description', raw),\n    on_screen_title: extract('on_screen_title', raw)\n  };\n}\n\n// If script is an array, join it\nlet script = parsed.script || '';\nif (Array.isArray(script)) script = script.join(' ');\n\nreturn [{\n  json: {\n    script: script || 'Script failed',\n    title: parsed.title || 'New Video',\n    description: parsed.description || '#shorts',\n    on_screen_title: (parsed.on_screen_title || 'TOP REVEAL').toUpperCase(),\n    row_number: $('Filter Next Row').item.json.row_number\n  }\n}];"
       },
       "id": "parse-ai",
       "name": "Parse AI Output",
@@ -180,65 +193,39 @@
     },
     {
       "parameters": {
-        "resource": "video",
-        "operation": "upload",
-        "title": "={{ $('Parse AI Output').item.json.title }}",
-        "description": "={{ $('Parse AI Output').item.json.description }}",
-        "binaryProperty": "data",
-        "options": {
-          "selfDeclaredMadeForKids": false
-        }
+        "method": "POST",
+        "url": "http://host.docker.internal:5001/upload_youtube",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"video_path\": \"{{ $('Local Video Maker').item.json.video_path }}\",\n  \"title\": \"{{ $('Parse AI Output').item.json.title }}\",\n  \"description\": \"{{ $('Parse AI Output').item.json.description }}\",\n  \"tags\": [\"#shorts\", \"#facts\", \"#weirdscience\"]\n}",
+        "options": {}
       },
       "id": "yt-upload",
       "name": "Upload to YouTube",
-      "type": "n8n-nodes-base.youTube",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
         1820,
         280
-      ],
-      "credentials": {
-        "youTubeOAuth2Api": {
-          "id": "woqvLNlgwSXNECxd",
-          "name": "YouTube account"
-        }
-      }
+      ]
     },
     {
       "parameters": {
-        "operation": "update",
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "INSERT_SHEET_ID_HERE"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "YT Automation Content"
-        },
-        "rowNumber": "={{ $('Parse AI Output').item.json.row_number }}",
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "Status": "DONE"
-          }
-        }
+        "method": "POST",
+        "url": "http://host.docker.internal:5001/mark-done",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"topic\": \"{{ $('Filter Next Row').item.json.Topic }}\",\n  \"status\": \"DONE\",\n  \"youtube_url\": \"{{ $json.url || '' }}\"\n}",
+        "options": {}
       },
       "id": "mark-done",
       "name": "Cross it off",
-      "type": "n8n-nodes-base.googleSheets",
+      "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         2080,
         280
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "INSERT_CREDENTIAL_ID_HERE",
-          "name": "Google Sheets account"
-        }
-      }
+      ]
     },
     {
       "parameters": {},
@@ -253,7 +240,7 @@
     }
   ],
   "connections": {
-    "Manual Trigger": {
+    "Webhook Trigger": {
       "main": [
         [
           {
@@ -264,7 +251,18 @@
         ]
       ]
     },
-    "Every Day @ 9AM": {
+    "Scheduled Posts": {
+      "main": [
+        [
+          {
+            "node": "Read Next Content Idea",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Run": {
       "main": [
         [
           {
@@ -276,6 +274,17 @@
       ]
     },
     "Read Next Content Idea": {
+      "main": [
+        [
+          {
+            "node": "Filter Next Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Next Row": {
       "main": [
         [
           {

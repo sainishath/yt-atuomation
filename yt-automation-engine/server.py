@@ -24,6 +24,7 @@ from media_engine import (
     generate_subtitles,
     pick_background,
     assemble_video,
+    compile_long_form,
     CFG
 )
 
@@ -257,6 +258,118 @@ def upload_youtube():
         return jsonify(result)
     except Exception as e:
         logger.error(f"✗ YouTube upload failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+@app.route('/compile-long-form', methods=['POST'])
+def route_compile_long_form():
+    """
+    Endpoint to stitch completed mp4 shorts losslessly into 1 long-form video.
+    Expected payload:
+    {
+        "short_paths": ["/path/to/short1.mp4", "/path/to/short2.mp4", ...],
+        "output_name": "compilation_weekly.mp4" (optional)
+    }
+    """
+    try:
+        data = request.json or {}
+        short_paths = data.get('short_paths', [])
+        output_name = data.get('output_name', CFG.get("compilation_output_name", "compilation_weekly.mp4"))
+        
+        if not short_paths:
+            return jsonify({"status": "error", "error": "No short_paths provided"}), 400
+            
+        output_path = OUTPUT_DIR / output_name
+        logger.info(f"Stitching {len(short_paths)} shorts into long-form compilation: {output_path.name}")
+        
+        compile_long_form(short_paths, str(output_path))
+        
+        return jsonify({
+            "status": "success",
+            "output_path": str(output_path),
+            "output_name": output_path.name
+        })
+    except Exception as e:
+        logger.error(f"✗ Long-form compilation failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+
+import csv
+
+CSV_PATH = Path(__file__).parent.parent / "files" / "02_resources_and_data" / "Topics_Queue.csv"
+
+@app.route('/get-next-topic', methods=['GET'])
+def get_next_topic():
+    """Reads the local CSV queue and returns all rows to n8n."""
+    try:
+        if not CSV_PATH.exists():
+            return jsonify({"status": "error", "error": f"CSV queue not found at {CSV_PATH}"}), 404
+            
+        rows = []
+        with open(CSV_PATH, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for idx, row in enumerate(reader):
+                row["row_number"] = idx + 2
+                rows.append(row)
+                
+        return jsonify(rows)
+    except Exception as e:
+        logger.error(f"✗ Failed to read CSV queue: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+@app.route('/mark-done', methods=['POST'])
+def mark_done():
+    """Updates the status column for a given topic in the local CSV queue."""
+    try:
+        data = request.json or {}
+        topic = data.get('topic', '')
+        status = data.get('status', 'DONE')
+        youtube_url = data.get('youtube_url', '')
+        
+        if not topic:
+            return jsonify({"status": "error", "error": "No topic provided"}), 400
+            
+        if not CSV_PATH.exists():
+            return jsonify({"status": "error", "error": "CSV queue file not found"}), 404
+            
+        rows = []
+        headers = []
+        with open(CSV_PATH, "r", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            headers = next(reader)
+            f.seek(0)
+            dict_reader = csv.DictReader(f)
+            rows = list(dict_reader)
+            
+        updated = False
+        for row in rows:
+            if row.get("Topic") == topic:
+                row["Video Status"] = status
+                if youtube_url:
+                    row["YouTube URL"] = youtube_url
+                updated = True
+                
+        if not updated:
+            for row in rows:
+                if topic in row.get("Topic", "") or row.get("Topic", "") in topic:
+                    row["Video Status"] = status
+                    if youtube_url:
+                        row["YouTube URL"] = youtube_url
+                    updated = True
+                    break
+                    
+        if updated:
+            with open(CSV_PATH, "w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=headers)
+                writer.writeheader()
+                writer.writerows(rows)
+            logger.info(f"✓ Marked topic as done: '{topic}'")
+            return jsonify({"status": "success", "message": f"Topic '{topic}' updated successfully."})
+        else:
+            return jsonify({"status": "error", "error": f"Topic '{topic}' not found in CSV"}), 404
+            
+    except Exception as e:
+        logger.error(f"✗ Failed to update CSV status: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 

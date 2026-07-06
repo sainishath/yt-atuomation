@@ -667,3 +667,31 @@ def pick_background(required_duration=60):
     print(f"[BG] Randomly selected: {chosen.name}")
     return str(chosen)
 
+
+def compile_long_form(short_paths, output_long_path):
+    """
+    Stitches completed mp4 shorts losslessly into 1 long-form video.
+    """
+    list_file_path = TEMP_DIR / "concat_list.txt"
+    
+    # Generate the instruction text file for FFmpeg
+    with open(list_file_path, "w", encoding="utf-8") as f:
+        for path in short_paths:
+            # Safely format paths for FFmpeg demuxer
+            safe_path = str(Path(path).resolve()).replace("\\", "/")
+            f.write(f"file '{safe_path}'\n")
+            
+    # Run a copy-codec stream concat (no re-encoding = near instant)
+    cmd = f'ffmpeg -y -f concat -safe 0 -i "{list_file_path}" -c copy "{output_long_path}"'
+    
+    result = subprocess.run(cmd, shell=True, capture_output=True)
+    
+    # Cleanup temp list file
+    if list_file_path.exists():
+        list_file_path.unlink()
+        
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg concat failed: {result.stderr.decode('utf-8', errors='ignore')}")
+        
+    return output_long_path
+
