@@ -1,0 +1,53 @@
+# Standardized Git Ignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.local
+.env.*.local
+node_modules/
+venv/
+.venv/
+env/
+datasets/
+dist/
+build/
+*.log
+.DS_Store
+
+# Output & Temporary Files
+temp/
+output/
+yt-automation-engine/temp/
+yt-automation-engine/videos/
+yt-automation-engine/videos_archive/
+yt-automation-engine/data
+
+# Media and Audio outputs
+*.mp4
+*.webm
+*.mp3
+*.wav
+*.ass
+*.srt
+*.jpg
+*.jpeg
+
+# Databases & Credentials
+*.sqlite
+*.zip
+youtube_token.pickle
+youtube_credentials.json
+yt-automation-engine/youtube_token.pickle
+yt-automation-engine/youtube_credentials.json
+script_queue.json
+
+# Binaries & Large Models
+*.exe
+*.dll
+*.ort
+espeak-ng-data/
+models/
+pkgconfig/
+
