@@ -242,9 +242,53 @@ def get_video(task_id=None):
     return send_file(video_to_serve, mimetype='video/mp4', as_attachment=True, download_name="final.mp4")
 
 
+
+@app.route('/auth-youtube', methods=['GET'])
+def auth_youtube():
+    """
+    One-time YouTube OAuth setup.
+    Visit http://localhost:5001/auth-youtube in your browser.
+    This opens a Google consent screen in a new browser tab/window (port 8090).
+    After you approve access, the token is saved automatically.
+    Only needs to be done ONCE — auto-refreshes forever after.
+    """
+    try:
+        from uploader import is_authorized, run_auth_flow
+        if is_authorized():
+            return "<h2>✅ YouTube already authorized!</h2><p>Your pipeline is ready to upload videos automatically.</p>", 200
+
+        # Run auth in background thread so Flask doesn't block
+        import threading
+        auth_thread = threading.Thread(target=run_auth_flow, daemon=True)
+        auth_thread.start()
+
+        return (
+            "<h2>YouTube Authorization Started</h2>"
+            "<p>A browser window should open automatically asking you to sign in with Google.</p>"
+            "<p>If no window opens, check your taskbar or visit "
+            "<a href='http://localhost:8090'>http://localhost:8090</a></p>"
+            "<p>After approving, refresh <a href='/auth-status'>/auth-status</a> to confirm.</p>"
+        ), 200
+    except Exception as e:
+        logger.error(f"✗ Auth flow failed: {e}")
+        return f"<h2>Error</h2><pre>{e}</pre>", 500
+
+
+@app.route('/auth-status', methods=['GET'])
+def auth_status():
+    """Check if YouTube OAuth is set up."""
+    try:
+        from uploader import is_authorized
+        authorized = is_authorized()
+        return jsonify({"youtube_authorized": authorized,
+                        "message": "Ready to upload" if authorized else "Visit /auth-youtube to authorize"})
+    except Exception as e:
+        return jsonify({"youtube_authorized": False, "error": str(e)}), 500
+
+
 @app.route('/upload_youtube', methods=['POST'])
 def upload_youtube():
-    """Exposes YouTube upload functionality."""
+    """Trigger a YouTube upload for a rendered video."""
     try:
         data = request.json or {}
         video_path = data.get('video_path', str(FINAL_VIDEO_PATH))
@@ -253,12 +297,20 @@ def upload_youtube():
         tags = data.get('tags', [])
         category_id = data.get('category_id', '27')
 
-        from uploader import upload_to_youtube
+        from uploader import upload_to_youtube, is_authorized
+        if not is_authorized():
+            return jsonify({
+                "status": "error",
+                "error": "YouTube not authorized. Visit http://localhost:5001/auth-youtube to authorize."
+            }), 401
+
         result = upload_to_youtube(video_path, title, description, tags, category_id)
         return jsonify(result)
     except Exception as e:
         logger.error(f"✗ YouTube upload failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
+
+
 @app.route('/compile-long-form', methods=['POST'])
 def route_compile_long_form():
     """
